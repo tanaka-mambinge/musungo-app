@@ -756,7 +756,6 @@ function AppContent() {
   }, [activePage]);
 
   const connected = earbuds.status === 'connected';
-  const scanning = earbuds.status === 'scanning' || earbuds.status === 'connecting';
   const loadingDeviceData = connected && (
     !earbuds.batteryReady ||
     controls.ancModes.length === 0 ||
@@ -964,13 +963,8 @@ function AppContent() {
               ? 'Pairing with the earbuds now. This should only take a moment.'
               : earbuds.status === 'scanning'
                 ? 'Keep the case open and nearby. We’ll connect automatically.'
-                : earbuds.message ?? 'Open the case and scan when you’re ready to reconnect.'}
+                : earbuds.message ?? 'Keep the case open and nearby. We’ll connect automatically.'}
           </Text>
-          <Pressable disabled={scanning} style={[styles.primaryButton, scanning && styles.disabledButton]} onPress={() => void scan()}>
-            <Text style={styles.primaryButtonText}>
-              {earbuds.status === 'connecting' ? 'Connecting…' : earbuds.status === 'scanning' ? 'Scanning…' : 'Scan for earbuds'}
-            </Text>
-          </Pressable>
         </View>
       )}
 
