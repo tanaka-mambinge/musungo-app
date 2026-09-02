@@ -86,6 +86,48 @@ You've successfully run and modified your React Native App. :partying_face:
 
 If you're having issues getting the above steps to work, see the [Troubleshooting](https://reactnative.dev/docs/troubleshooting) page.
 
+# Android build reference
+
+This project has two co-installable Android builds:
+
+| Build | Command | Application ID | Launcher label | Metro |
+| --- | --- | --- | --- | --- |
+| DEV/debug | `npm start`, then `npm run android` | `com.musungo.mheadphones.dev` | `Musungo Headphones DEV` | Required |
+| PROD/release | `./gradlew :app:assembleRelease` | `com.musungo.mheadphones` | `Musungo Headphones` | Not required |
+
+The Kotlin namespace stays `com.musungo.mheadphones` for both variants. Only the debug application ID receives the `.dev` suffix, so native integrations continue to use the same namespace while Android keeps the app data and launcher entries separate.
+
+## Build PROD
+
+From the repository root, use a JDK that includes `javac` (JDK 17 is the tested setup):
+
+```sh
+cd android
+env JAVA_HOME=/path/to/jdk-17 PATH=/path/to/jdk-17/bin:$PATH \
+  ./gradlew :app:assembleRelease \
+  -x :app:lintVitalRelease \
+  -x :app:lintVitalAnalyzeRelease \
+  -x :app:lintVitalReportRelease
+```
+
+The standalone APK is written to:
+
+```text
+android/app/build/outputs/apk/release/app-release.apk
+```
+
+Install it on a connected emulator or device with:
+
+```sh
+adb install -r android/app/build/outputs/apk/release/app-release.apk
+```
+
+## Release native-build fix
+
+React Native 0.87's Fabric/New Architecture component descriptors were crashing during PROD startup when the release C++ build defined `NDEBUG`. The app could install successfully but immediately died with a native `SIGSEGV` before the first screen rendered.
+
+The release CMake configuration in `android/app/src/main/jni/CMakeLists.txt` keeps assertions enabled by adding `-UNDEBUG` to the `RelWithDebInfo` flags. Do not remove the custom CMake configuration or re-add `-DNDEBUG` to that release configuration without retesting startup on an emulator.
+
 # Learn More
 
 To learn more about React Native, take a look at the following resources:
