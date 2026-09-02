@@ -33,8 +33,10 @@ import com.jieli.bluetooth.constant.BluetoothConstant
 import com.jieli.bluetooth.constant.JL_DeviceType
 import com.jieli.bluetooth.impl.rcsp.RCSPController
 import com.jieli.bluetooth.utils.ParseDataUtil
+import com.jieli.bluetooth.utils.CommandBuilder
 import com.jieli.bluetooth.interfaces.rcsp.callback.BTRcspEventCallback
 import com.jieli.bluetooth.interfaces.rcsp.callback.OnRcspActionCallback
+import com.jieli.bluetooth.interfaces.bluetooth.RcspCommandCallback
 
 class JieliModule(private val context: ReactApplicationContext) : ReactContextBaseJavaModule(context) {
     companion object {
@@ -97,6 +99,11 @@ class JieliModule(private val context: ReactApplicationContext) : ReactContextBa
 
         override fun onDeviceResponse(device: BluetoothDevice, cmd: CommandBase<*, *>) {
             logWireCommand("RESPONSE", device, cmd)
+        }
+
+        override fun onDeviceData(device: BluetoothDevice, data: ByteArray) {
+            Log.d("JieliAudioMode", "RAW_RX device=${device.address} data=${hex(data)}")
+            parseAudioModeResponse(data)
         }
 
         override fun onExpandFunction(device: BluetoothDevice, type: Int, data: ByteArray) {
@@ -271,6 +278,68 @@ class JieliModule(private val context: ReactApplicationContext) : ReactContextBa
     fun setEqMode(mode: Int) {
         mainHandler.post {
             emitControlMessage("EQ profiles are unavailable for this firmware.")
+        }
+    }
+
+    /** Temporary native-only feasibility probe for the earbuds' separate audio models. */
+    @ReactMethod
+    fun probeAudioMode(mode: Int) {
+        mainHandler.post {
+            if (mode !in 0..1) {
+                Log.d("JieliAudioMode", "PROBE rejected invalid model=$mode; expected 0 or 1")
+                return@post
+            }
+
+            val activeController = controller ?: return@post
+            val device = currentDevice ?: activeController.usingDevice
+            if (device == null || !activeController.isDeviceConnected(device)) {
+                Log.d("JieliAudioMode", "PROBE unavailable: earbuds are not connected")
+                return@post
+            }
+
+            val command = byteArrayOf(
+                0xF5.toByte(),
+                0x07,
+                0x01,
+                0x07,
+                mode.toByte(),
+                0x00,
+                0x00,
+            )
+            val checksum = command
+                .take(5)
+                .sumOf { it.toInt() and 0xFF }
+            command[5] = (checksum and 0xFF).toByte()
+            command[6] = ((checksum ushr 8) and 0xFF).toByte()
+
+            val sdkCommand = CommandBuilder.buildCustomCmd(command)
+            Log.d("JieliAudioMode", "PROBE_SET model=$mode packet=${hex(command)} envelope=${sdkCommand.id}")
+            activeController.sendRcspCommand(device, sdkCommand, object : RcspCommandCallback {
+                override fun onCommandResponse(ignoredDevice: BluetoothDevice, response: CommandBase<*, *>) {
+                    logWireCommand("AUDIO_CUSTOM_RESPONSE", ignoredDevice, response)
+                    if (response.status == 0) {
+                        mainHandler.postDelayed({ queryAudioModeInternal(activeController, device) }, 300)
+                    }
+                }
+
+                override fun onErrCode(ignoredDevice: BluetoothDevice, error: BaseError) {
+                    Log.d("JieliAudioMode", "AUDIO_CUSTOM_ERROR model=$mode error=$error")
+                }
+            })
+        }
+    }
+
+    /** Temporary native-only query for the separate audio-model state. */
+    @ReactMethod
+    fun queryAudioMode() {
+        mainHandler.post {
+            val activeController = controller ?: return@post
+            val device = currentDevice ?: activeController.usingDevice
+            if (device == null || !activeController.isDeviceConnected(device)) {
+                Log.d("JieliAudioMode", "QUERY unavailable: earbuds are not connected")
+                return@post
+            }
+            queryAudioModeInternal(activeController, device)
         }
     }
 
@@ -575,6 +644,45 @@ class JieliModule(private val context: ReactApplicationContext) : ReactContextBa
         })
     }
 
+    private fun queryAudioModeInternal(activeController: RCSPController, device: BluetoothDevice) {
+        val query = byteArrayOf(
+            0xF5.toByte(),
+            0x07,
+            0x00,
+            0x06,
+            0x08,
+            0x01,
+        )
+        val sdkCommand = CommandBuilder.buildCustomCmd(query)
+        Log.d("JieliAudioMode", "QUERY packet=${hex(query)} envelope=${sdkCommand.id}")
+        activeController.sendRcspCommand(device, sdkCommand, object : RcspCommandCallback {
+            override fun onCommandResponse(ignoredDevice: BluetoothDevice, response: CommandBase<*, *>) {
+                logWireCommand("AUDIO_QUERY_RESPONSE", ignoredDevice, response)
+                val responseData = response.response?.rawData
+                if (responseData != null) parseAudioModeResponse(responseData)
+            }
+
+            override fun onErrCode(ignoredDevice: BluetoothDevice, error: BaseError) {
+                Log.d("JieliAudioMode", "AUDIO_QUERY_ERROR error=$error")
+            }
+        })
+    }
+
+    private fun parseAudioModeResponse(data: ByteArray) {
+        if (data.size < 7) return
+        if ((data[0].toInt() and 0xFF) != 0xF5) return
+        if ((data[1].toInt() and 0xFF) != 0x07) return
+        val responseType = data[2].toInt() and 0xFF
+        if (responseType != 0x02 && responseType != 0x03 && responseType != 0x0B) return
+        if ((data[3].toInt() and 0xFF) != 0x07) return
+
+        val mode = data[4].toInt() and 0xFF
+        Log.d("JieliAudioMode", "MODE_RESPONSE type=$responseType model=$mode raw=${hex(data)}")
+        val map = Arguments.createMap()
+        map.putInt("audioMode", mode)
+        emitControls(map)
+    }
+
     private fun logWireCommand(direction: String, device: BluetoothDevice, cmd: CommandBase<*, *>) {
         Log.d(
             "JieliWire",
@@ -702,6 +810,7 @@ class JieliModule(private val context: ReactApplicationContext) : ReactContextBa
         map.putBoolean("leftCharging", info.isLeftCharging)
         map.putBoolean("rightCharging", info.isRightCharging)
         map.putBoolean("caseCharging", info.isDeviceCharging)
+        map.putBoolean("batteryReady", true)
         map.putNull("message")
         map.putBoolean("shouldScan", false)
         val controlsMap = Arguments.createMap()
@@ -740,6 +849,7 @@ class JieliModule(private val context: ReactApplicationContext) : ReactContextBa
         map.putBoolean("leftCharging", false)
         map.putBoolean("rightCharging", false)
         map.putBoolean("caseCharging", false)
+        map.putBoolean("batteryReady", false)
         if (message == null) map.putNull("message") else map.putString("message", message)
         map.putBoolean("shouldScan", shouldScan)
         if (deviceName != null) MusungoWidget.updateDeviceName(context, deviceName)

@@ -64,6 +64,7 @@ interface EarbudState {
   leftCharging: boolean;
   rightCharging: boolean;
   caseCharging: boolean;
+  batteryReady: boolean;
   message: string | null;
   shouldScan: boolean;
 }
@@ -72,6 +73,8 @@ interface JieliNativeModule {
   startScan(): void;
   stopScan(): void;
   setEqMode(mode: number): void;
+  probeAudioMode(mode: number): void;
+  queryAudioMode(): void;
   setAncMode(mode: number): void;
   setGameMode(enabled: boolean): void;
   setDeviceName(name: string): void;
@@ -132,7 +135,7 @@ const ANC_NAMES: Record<number, string> = {
 };
 
 const initialState: EarbudState = {
-  status: 'disconnected',
+  status: 'scanning',
   deviceName: null,
   productName: null,
   left: null,
@@ -141,6 +144,7 @@ const initialState: EarbudState = {
   leftCharging: false,
   rightCharging: false,
   caseCharging: false,
+  batteryReady: false,
   message: null,
   shouldScan: false,
 };
@@ -746,6 +750,13 @@ function AppContent() {
 
   const connected = earbuds.status === 'connected';
   const scanning = earbuds.status === 'scanning' || earbuds.status === 'connecting';
+  const loadingDeviceData = connected && (
+    !earbuds.batteryReady ||
+    controls.ancModes.length === 0 ||
+    controls.ancMode === null ||
+    controls.gameMode === null
+  );
+  const ready = connected && !loadingDeviceData;
   const caseAvailable = earbuds.case !== null || controls.caseStatus !== null || earbuds.caseCharging;
   const caseStatusLabel = controls.caseStatus === null ? 'Unavailable' : controls.caseStatus === 'open' ? 'Open' : 'Closed';
   const casePowerLabel = earbuds.caseCharging ? 'Charging' : earbuds.case === null ? 'Unavailable' : 'Not charging';
@@ -794,7 +805,7 @@ function AppContent() {
         <Image source={MUSUNGO_LOGO} style={styles.brandLogo} resizeMode="contain" />
       </View>
 
-      {connected ? activePage === 'gestures' ? (
+      {ready ? activePage === 'gestures' ? (
         <GestureGuidePage />
       ) : (
         <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer} showsVerticalScrollIndicator={false}>
@@ -929,7 +940,7 @@ function AppContent() {
             {controls.controlsMessage ? <Text style={styles.infoMessage}>{controls.controlsMessage}</Text> : null}
           </View> : null}
         </ScrollView>
-      ) : scanning ? (
+      ) : connected ? (
         <LoadingSkeletonPage />
       ) : (
         <View style={styles.disconnectedContent}>
