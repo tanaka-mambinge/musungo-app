@@ -13,6 +13,13 @@ class MainActivity : ReactActivity() {
    */
   override fun getMainComponentName(): String = "MusungoHeadphones"
 
+  override fun onResume() {
+    super.onResume()
+    if (MusungoWidget.hasWidgets(this)) {
+      MusungoDeviceService.startMonitoring(this)
+    }
+  }
+
   /**
    * Returns the instance of the [ReactActivityDelegate]. We use [DefaultReactActivityDelegate]
    * which allows you to enable New Architecture with a single boolean flags [fabricEnabled]

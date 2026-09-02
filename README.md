@@ -128,6 +128,19 @@ React Native 0.87's Fabric/New Architecture component descriptors were crashing 
 
 The release CMake configuration in `android/app/src/main/jni/CMakeLists.txt` keeps assertions enabled by adding `-UNDEBUG` to the `RelWithDebInfo` flags. Do not remove the custom CMake configuration or re-add `-DNDEBUG` to that release configuration without retesting startup on an emulator.
 
+## Widget background monitoring
+
+The Android widget uses a native connected-device foreground service so its controls do not depend on the React Native activity remaining alive. A single control tap queues the action, reconnects to the bonded earbuds when necessary, and sends the command after connection.
+
+While at least one widget is installed and the earbuds are connected, the service:
+
+- applies connection and control updates from Jieli events;
+- refreshes battery immediately after connection, control commands, settings events, and app resume;
+- performs a 60-second battery safety refresh without changing the connection label;
+- shows a silent, low-priority notification only during active monitoring.
+
+Monitoring stops after the real Bluetooth session disconnects or the last widget is removed. The service does not continuously scan in the background. Android force-stop is unsupported because it blocks widgets and services until the app is opened again.
+
 # Learn More
 
 To learn more about React Native, take a look at the following resources:

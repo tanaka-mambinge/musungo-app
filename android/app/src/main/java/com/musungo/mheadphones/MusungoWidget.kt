@@ -3,37 +3,55 @@ package com.musungo.mheadphones
 import android.app.PendingIntent
 import android.appwidget.AppWidgetManager
 import android.appwidget.AppWidgetProvider
-import android.bluetooth.BluetoothDevice
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.graphics.Color
 import android.widget.RemoteViews
-import com.jieli.bluetooth.bean.base.BaseError
-import com.jieli.bluetooth.bean.base.VoiceMode
-import com.jieli.bluetooth.impl.rcsp.RCSPController
-import com.jieli.bluetooth.interfaces.rcsp.callback.OnRcspActionCallback
 
 class MusungoWidget : AppWidgetProvider() {
     override fun onReceive(context: Context, intent: Intent) {
         super.onReceive(context, intent)
-        if (intent.action == ACTION_CYCLE_NOISE) cycleNoise(context)
+        if (intent.action == ACTION_CYCLE_NOISE) MusungoDeviceService.cycleNoise(context)
     }
 
     override fun onUpdate(context: Context, manager: AppWidgetManager, ids: IntArray) {
+        setWidgetCount(context, manager.getAppWidgetIds(ComponentName(context, MusungoWidget::class.java)).size)
         ids.forEach { updateWidget(context, manager, it) }
     }
 
+    override fun onEnabled(context: Context) {
+        setWidgetCount(context, 1)
+        MusungoDeviceService.startMonitoring(context)
+    }
+
+    override fun onDeleted(context: Context, appWidgetIds: IntArray) {
+        val manager = AppWidgetManager.getInstance(context)
+        setWidgetCount(context, manager.getAppWidgetIds(ComponentName(context, MusungoWidget::class.java)).size)
+        if (!hasWidgets(context)) MusungoDeviceService.stopMonitoring(context)
+    }
+
+    override fun onDisabled(context: Context) {
+        setWidgetCount(context, 0)
+        MusungoDeviceService.stopMonitoring(context)
+    }
+
     companion object {
-        private const val PREFS = "musungo_widget"
+        internal const val PREFS = "musungo_widget"
         private const val STATUS = "status"
         private const val DEVICE_NAME = "device_name"
         private const val LEFT = "left"
         private const val RIGHT = "right"
         private const val LEFT_CHARGING = "left_charging"
         private const val RIGHT_CHARGING = "right_charging"
-        private const val NOISE_MODE = "noise_mode"
-        private const val ACTION_CYCLE_NOISE = "com.musungo.mheadphones.ACTION_CYCLE_NOISE"
+        internal const val NOISE_MODE = "noise_mode"
+        private const val WIDGET_COUNT = "widget_count"
+        private const val ACTION_CYCLE_NOISE = MusungoDeviceService.ACTION_CYCLE_NOISE
+
+        fun hasWidgets(context: Context): Boolean =
+            AppWidgetManager.getInstance(context)
+                .getAppWidgetIds(ComponentName(context, MusungoWidget::class.java))
+                .isNotEmpty()
 
         fun updateState(
             context: Context,
@@ -73,21 +91,11 @@ class MusungoWidget : AppWidgetProvider() {
             manager.getAppWidgetIds(component).forEach { updateWidget(context, manager, it) }
         }
 
-        private fun cycleNoise(context: Context) {
-            if (!RCSPController.isInit()) return
-            val controller = RCSPController.getInstance()
-            if (!controller.isDeviceConnected()) return
-            val device = controller.usingDevice ?: return
-            val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            val currentMode = prefs.getInt(NOISE_MODE, 0)
-            val nextMode = (currentMode + 1) % 3
-            controller.setCurrentVoiceMode(device, VoiceMode().setMode(nextMode), object : OnRcspActionCallback<Boolean> {
-                override fun onSuccess(ignored: BluetoothDevice, ignoredResult: Boolean) {
-                    updateNoiseMode(context, nextMode)
-                }
-
-                override fun onError(ignored: BluetoothDevice, ignoredError: BaseError) = Unit
-            })
+        private fun setWidgetCount(context: Context, count: Int) {
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .edit()
+                .putInt(WIDGET_COUNT, count)
+                .apply()
         }
 
         private fun updateWidget(context: Context, manager: AppWidgetManager, widgetId: Int) {

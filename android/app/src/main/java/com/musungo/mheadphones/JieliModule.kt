@@ -56,7 +56,6 @@ class JieliModule(private val context: ReactApplicationContext) : ReactContextBa
     private var callbackRegistered = false
     private var currentDevice: BluetoothDevice? = null
     private var pendingRename: Pair<BluetoothDevice, String>? = null
-    private var batteryPoll: Runnable? = null
     private var reconnectGrace: Runnable? = null
     private var monitoringCase = false
     private var bluetoothOption: BluetoothOption? = null
@@ -115,7 +114,6 @@ class JieliModule(private val context: ReactApplicationContext) : ReactContextBa
                 if (state == BluetoothProfile.STATE_DISCONNECTED) {
                     if (currentDevice != null && !sameDevice(currentDevice, device)) return@post
                     currentDevice = null
-                    stopBatteryPolling()
                     stopScanInternal()
                     scheduleReconnectScan()
                     return@post
@@ -128,8 +126,8 @@ class JieliModule(private val context: ReactApplicationContext) : ReactContextBa
                     currentDevice = connectedDevice
                     emitState("connected", deviceName = deviceName(connectedDevice))
                     queryBattery(connectedDevice)
-                    startBatteryPolling(connectedDevice)
                     queryControls(connectedDevice)
+                    if (MusungoWidget.hasWidgets(context)) MusungoDeviceService.startMonitoring(context)
                     startCaseStatusMonitor()
                     verifyPendingRename(connectedDevice)
                 } else if (state == BluetoothProfile.STATE_CONNECTED) {
@@ -137,8 +135,8 @@ class JieliModule(private val context: ReactApplicationContext) : ReactContextBa
                     currentDevice = device
                     emitState("connected", deviceName = deviceName(device))
                     queryBattery(device)
-                    startBatteryPolling(device)
                     queryControls(device)
+                    if (MusungoWidget.hasWidgets(context)) MusungoDeviceService.startMonitoring(context)
                     startCaseStatusMonitor()
                     verifyPendingRename(device)
                 } else if (state == BluetoothProfile.STATE_CONNECTING || state == BluetoothProfile.STATE_DISCONNECTING) {
@@ -198,8 +196,8 @@ class JieliModule(private val context: ReactApplicationContext) : ReactContextBa
                     currentDevice = device
                     emitState("connected", deviceName = deviceName(device))
                     queryBattery(device)
-                    startBatteryPolling(device)
                     queryControls(device)
+                    if (MusungoWidget.hasWidgets(context)) MusungoDeviceService.startMonitoring(context)
                     startCaseStatusMonitor()
                 }
                 return@post
@@ -456,19 +454,7 @@ class JieliModule(private val context: ReactApplicationContext) : ReactContextBa
     fun removeListeners(count: Int) = Unit
 
     private fun initializeController(): RCSPController? {
-        if (!RCSPController.isInit()) {
-            val option = BluetoothOption.createDefaultOption()
-                .setUseMultiDevice(true)
-                .setPriority(BluetoothOption.PREFER_BLE)
-                .setMandatoryUseBLE(true)
-                .setMtu(BluetoothConstant.BLE_MTU_MAX)
-                .setUseDeviceAuth(true)
-                .setBleScanMode(2)
-            bluetoothOption = option
-            RCSPController.init(context.applicationContext, option)
-        }
-
-        val activeController = RCSPController.getInstance()
+        val activeController = JieliControllerRuntime.getController(context)
         controller = activeController
         if (bluetoothOption == null) bluetoothOption = activeController.bluetoothOption
         if (!callbackRegistered) {
@@ -556,28 +542,6 @@ class JieliModule(private val context: ReactApplicationContext) : ReactContextBa
     private fun cancelReconnectGrace() {
         reconnectGrace?.let { mainHandler.removeCallbacks(it) }
         reconnectGrace = null
-    }
-
-    private fun startBatteryPolling(device: BluetoothDevice) {
-        stopBatteryPolling()
-        val poll = object : Runnable {
-            override fun run() {
-                val activeController = controller
-                if (activeController?.isDeviceConnected(device) != true) {
-                    stopBatteryPolling()
-                    return
-                }
-                queryBattery(device)
-                mainHandler.postDelayed(this, 2_500)
-            }
-        }
-        batteryPoll = poll
-        mainHandler.postDelayed(poll, 2_500)
-    }
-
-    private fun stopBatteryPolling() {
-        batteryPoll?.let { mainHandler.removeCallbacks(it) }
-        batteryPoll = null
     }
 
     private fun queryControls(device: BluetoothDevice) {
@@ -898,7 +862,6 @@ class JieliModule(private val context: ReactApplicationContext) : ReactContextBa
 
     override fun onCatalystInstanceDestroy() {
         stopScanInternal()
-        stopBatteryPolling()
         cancelReconnectGrace()
         controller?.removeBTRcspEventCallback(rcspCallback)
         super.onCatalystInstanceDestroy()
