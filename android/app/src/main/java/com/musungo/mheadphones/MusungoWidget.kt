@@ -104,6 +104,12 @@ class MusungoWidget : AppWidgetProvider() {
             views.setTextViewText(R.id.widget_device_name, name)
             views.setTextViewText(R.id.widget_connection_status, connectionLabel(status))
             views.setTextColor(R.id.widget_connection_status, connectionColor(status))
+            views.setViewVisibility(R.id.widget_battery_row, if (connected) android.view.View.VISIBLE else android.view.View.GONE)
+            views.setViewVisibility(R.id.widget_state_row, if (connected) android.view.View.GONE else android.view.View.VISIBLE)
+            views.setViewVisibility(R.id.widget_noise_row, if (connected) android.view.View.VISIBLE else android.view.View.GONE)
+            views.setImageViewResource(R.id.widget_state_icon, connectionIcon(status))
+            views.setTextViewText(R.id.widget_state_message, connectionMessage(status))
+            views.setTextViewText(R.id.widget_state_detail, connectionDetail(status))
             views.setTextViewText(R.id.widget_left_battery, formatBattery("L", left))
             views.setTextViewText(R.id.widget_right_battery, formatBattery("R", right))
             views.setProgressBar(R.id.widget_left_battery_progress, 100, batteryProgress(left), false)
@@ -116,6 +122,15 @@ class MusungoWidget : AppWidgetProvider() {
             views.setImageViewResource(R.id.widget_noise_mode_icon, noiseIcon(noiseMode))
             views.setImageViewResource(R.id.widget_left_bud, R.drawable.widget_earbud_left)
             views.setImageViewResource(R.id.widget_right_bud, R.drawable.widget_earbud_right)
+
+            val openAppIntent = Intent(context, MainActivity::class.java)
+            val openAppPendingIntent = PendingIntent.getActivity(
+                context,
+                widgetId,
+                openAppIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+            views.setOnClickPendingIntent(R.id.widget_state_row, openAppPendingIntent)
 
             val cycleIntent = Intent(context, MusungoWidget::class.java).setAction(ACTION_CYCLE_NOISE)
             val cyclePendingIntent = PendingIntent.getBroadcast(
@@ -158,6 +173,23 @@ class MusungoWidget : AppWidgetProvider() {
             "connected" -> Color.parseColor("#70DF90")
             "connecting", "scanning" -> Color.parseColor("#FFC66D")
             else -> Color.parseColor("#AEB4BD")
+        }
+
+        private fun connectionIcon(status: String): Int = when (status) {
+            "disconnected" -> R.drawable.widget_status_disconnected
+            else -> R.drawable.widget_status_connecting
+        }
+
+        private fun connectionMessage(status: String): String = when (status) {
+            "connecting" -> "Connecting to your earbuds"
+            "scanning" -> "Looking for your earbuds"
+            else -> "Earbuds disconnected"
+        }
+
+        private fun connectionDetail(status: String): String = when (status) {
+            "connecting" -> "Keep them nearby"
+            "scanning" -> "Keep the case open"
+            else -> "Tap to open Musungo and reconnect"
         }
 
         private fun noiseLabel(mode: Int): String = when (mode) {
