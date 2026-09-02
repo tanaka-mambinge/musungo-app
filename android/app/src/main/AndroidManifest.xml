@@ -38,6 +38,13 @@
           android:name="android.appwidget.provider"
           android:resource="@xml/musungo_widget_info" />
       </receiver>
+      <receiver
+        android:name=".MusungoBluetoothReceiver"
+        android:exported="false">
+        <intent-filter>
+          <action android:name="android.bluetooth.device.action.ACL_CONNECTED" />
+        </intent-filter>
+      </receiver>
       <service
         android:name=".MusungoDeviceService"
         android:exported="false"

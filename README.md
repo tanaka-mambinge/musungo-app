@@ -139,7 +139,7 @@ While at least one widget is installed and the earbuds are connected, the servic
 - performs a 60-second battery safety refresh without changing the connection label;
 - shows a silent, low-priority notification only during active monitoring.
 
-Monitoring stops after the real Bluetooth session disconnects or the last widget is removed. The service does not continuously scan in the background. Android force-stop is unsupported because it blocks widgets and services until the app is opened again.
+Monitoring stops after the real Bluetooth session disconnects or the last widget is removed. A system Bluetooth reconnect event wakes monitoring again when the widget is still installed, so no widget tap is needed to refresh the connection. The service does not continuously scan in the background. Android force-stop is unsupported because it blocks widgets and services until the app is opened again.
 
 # Learn More
 

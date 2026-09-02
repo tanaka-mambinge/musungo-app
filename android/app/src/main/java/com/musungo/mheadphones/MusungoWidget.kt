@@ -53,6 +53,10 @@ class MusungoWidget : AppWidgetProvider() {
                 .getAppWidgetIds(ComponentName(context, MusungoWidget::class.java))
                 .isNotEmpty()
 
+        fun isConnected(context: Context): Boolean =
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getString(STATUS, null) == "connected"
+
         fun updateState(
             context: Context,
             status: String,

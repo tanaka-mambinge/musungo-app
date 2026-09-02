@@ -77,8 +77,12 @@ class MusungoDeviceService : Service() {
                     state == BluetoothProfile.STATE_CONNECTING || state == BluetoothProfile.STATE_DISCONNECTING -> {
                         if (!connected) {
                             activeDevice = device
-                            MusungoWidget.updateState(this@MusungoDeviceService, "connecting", null, null)
-                            updateNotification("Connecting to your earbuds")
+                            if (MusungoWidget.isConnected(this@MusungoDeviceService)) {
+                                updateNotification("Reconnecting to your earbuds")
+                            } else {
+                                MusungoWidget.updateState(this@MusungoDeviceService, "connecting", null, null)
+                                updateNotification("Connecting to your earbuds")
+                            }
                         }
                     }
                     state == BluetoothProfile.STATE_DISCONNECTED -> {
@@ -111,7 +115,9 @@ class MusungoDeviceService : Service() {
         super.onCreate()
         Log.d("MusungoService", "Service created")
         createNotificationChannel()
-        promoteToForeground("Connecting to your earbuds")
+        promoteToForeground(
+            if (MusungoWidget.isConnected(this)) "Reconnecting to your earbuds" else "Connecting to your earbuds",
+        )
         if (JieliControllerRuntime.hasBluetoothPermission(this)) {
             controller = JieliControllerRuntime.getController(this)
             controller?.addBTRcspEventCallback(rcspCallback)
@@ -165,10 +171,16 @@ class MusungoDeviceService : Service() {
             return
         }
 
+        if (connected && activeDevice != null) {
+            if (pendingCycle) sendNextNoiseMode(activeDevice!!)
+            return
+        }
+
         connected = false
         activeDevice = JieliControllerRuntime.findBondedDevice(this)
-        MusungoWidget.updateState(this, "connecting", null, null)
-        updateNotification("Connecting to your earbuds")
+        val reconnecting = MusungoWidget.isConnected(this)
+        if (!reconnecting) MusungoWidget.updateState(this, "connecting", null, null)
+        updateNotification(if (reconnecting) "Reconnecting to your earbuds" else "Connecting to your earbuds")
         val connectStarted = JieliControllerRuntime.connectKnownDevice(this, activeController)
         if (!connectStarted) {
             Log.d("MusungoService", "No bonded ZenVibe device available for background connection")

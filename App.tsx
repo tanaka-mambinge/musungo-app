@@ -135,7 +135,7 @@ const ANC_NAMES: Record<number, string> = {
 };
 
 const initialState: EarbudState = {
-  status: 'scanning',
+  status: 'disconnected',
   deviceName: null,
   productName: null,
   left: null,
@@ -702,6 +702,13 @@ function AppContent() {
       }
       const state = next as EarbudState;
       setEarbuds(current => {
+        if (current.status === 'connected' && (state.status === 'connecting' || state.status === 'scanning')) {
+          return {
+            ...current,
+            deviceName: state.deviceName ?? current.deviceName,
+            productName: state.productName ?? current.productName,
+          };
+        }
         const sameConnectedSession = current.status === 'connected' && state.status === 'connected';
         return {
           ...current,
