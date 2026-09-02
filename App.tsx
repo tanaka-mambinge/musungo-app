@@ -13,6 +13,7 @@ import {
   StatusBar,
   StyleSheet,
   Text,
+  TextInput,
   View,
   type StyleProp,
   type ViewStyle,
@@ -39,6 +40,7 @@ import IconHandClick from '@tabler/icons-react-native/IconHandClick';
 import IconInfoCircle from '@tabler/icons-react-native/IconInfoCircle';
 import IconMicrophone from '@tabler/icons-react-native/IconMicrophone';
 import IconPhoneOff from '@tabler/icons-react-native/IconPhoneOff';
+import IconPencil from '@tabler/icons-react-native/IconPencil';
 import IconPlayerPlay from '@tabler/icons-react-native/IconPlayerPlay';
 import IconPlayerTrackNext from '@tabler/icons-react-native/IconPlayerTrackNext';
 import IconScan from '@tabler/icons-react-native/IconScan';
@@ -55,6 +57,7 @@ type ConnectionStatus = 'connected' | 'connecting' | 'disconnected' | 'scanning'
 interface EarbudState {
   status: ConnectionStatus;
   deviceName: string | null;
+  productName: string | null;
   left: number | null;
   right: number | null;
   case: number | null;
@@ -71,6 +74,7 @@ interface JieliNativeModule {
   setEqMode(mode: number): void;
   setAncMode(mode: number): void;
   setGameMode(enabled: boolean): void;
+  setDeviceName(name: string): void;
   addListener(eventName: string): void;
   removeListeners(count: number): void;
 }
@@ -83,6 +87,7 @@ const MUSUNGO_LOGO = require('./assets/musungo_logo.png');
 const ZENVIBE_DEVICE_IMAGE = require('./assets/musungo_zen_vibe_2.png');
 const SHOW_SOUND_CONTROLS = false;
 const SHOW_CASE_CARD = false;
+export const MAX_DEVICE_NAME_BYTES = 31;
 
 type EqPreset = { mode: number; values: number[]; dynamic: boolean };
 
@@ -108,6 +113,8 @@ const initialControls: ControlsState = {
   gameMode: null,
 };
 
+type RenamePhase = 'idle' | 'saving' | 'success' | 'error';
+
 const EQ_NAMES: Record<number, string> = {
   0: 'Standard',
   1: 'Rock',
@@ -127,6 +134,7 @@ const ANC_NAMES: Record<number, string> = {
 const initialState: EarbudState = {
   status: 'disconnected',
   deviceName: null,
+  productName: null,
   left: null,
   right: null,
   case: null,
@@ -136,6 +144,42 @@ const initialState: EarbudState = {
   message: null,
   shouldScan: false,
 };
+
+export function utf8ByteLength(value: string): number {
+  let length = 0;
+  for (const character of value) {
+    const codePoint = character.codePointAt(0) ?? 0;
+    length += codePoint <= 0x7f ? 1 : codePoint <= 0x7ff ? 2 : codePoint <= 0xffff ? 3 : 4;
+  }
+  return length;
+}
+
+export function buildDeviceName(ownerName: string, productName: string): string {
+  const normalizedOwnerName = ownerName.trim().replace(/ +/g, ' ');
+  return normalizedOwnerName ? `${normalizedOwnerName}'s ${productName}` : '';
+}
+
+export function validateOwnerName(ownerName: string, productName: string): string | null {
+  if (!ownerName) {
+    return 'Enter your name.';
+  }
+  if (!/^[a-zA-Z0-9]+$/.test(ownerName)) {
+    return 'Use letters and numbers only.';
+  }
+  const finalName = buildDeviceName(ownerName, productName);
+  if (utf8ByteLength(finalName) > MAX_DEVICE_NAME_BYTES) {
+    return 'That name is too long for the earbuds.';
+  }
+  return null;
+}
+
+function ownerNameFromDeviceName(deviceName: string | null, productName: string | null): string {
+  if (!deviceName || !productName) {
+    return '';
+  }
+  const suffix = `'s ${productName}`;
+  return deviceName.endsWith(suffix) ? deviceName.slice(0, -suffix.length) : '';
+}
 
 async function requestBluetoothAndScan() {
   if (Platform.OS !== 'android') {
@@ -465,6 +509,78 @@ function SoundControlsModal({visible, onClose}: {visible: boolean; onClose: () =
   );
 }
 
+function RenameModal({
+  visible,
+  connected,
+  ownerName,
+  productName,
+  phase,
+  message,
+  onOwnerNameChange,
+  onClose,
+  onSave,
+}: {
+  visible: boolean;
+  connected: boolean;
+  ownerName: string;
+  productName: string | null;
+  phase: RenamePhase;
+  message: string | null;
+  onOwnerNameChange: (value: string) => void;
+  onClose: () => void;
+  onSave: () => void;
+}) {
+  if (!productName) {
+    return null;
+  }
+
+  const finalName = buildDeviceName(ownerName, productName);
+  const validationMessage = validateOwnerName(ownerName, productName);
+  const isComplete = phase === 'success';
+  const isSaving = phase === 'saving';
+  const isNameTooLong = validationMessage === 'That name is too long for the earbuds.';
+  const feedbackMessage = isNameTooLong ? 'Name too long' : message;
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable style={styles.modalBackdrop} onPress={onClose}>
+        <Pressable style={styles.modalCard} onPress={() => undefined}>
+          <View style={styles.modalAccent} />
+          <ModalHeader title="Name your earbuds" onClose={onClose} />
+          <Text style={styles.renameLabel}>Your name</Text>
+          <TextInput
+            autoCapitalize="words"
+            autoCorrect={false}
+            editable={!isSaving && !isComplete}
+            maxLength={64}
+            onChangeText={value => onOwnerNameChange(value.replace(/[^a-zA-Z0-9]/g, ''))}
+            placeholder="e.g. Tawanda"
+            placeholderTextColor="#777777"
+            style={styles.renameInput}
+            value={ownerName}
+          />
+          <Text style={styles.renamePreview}>{finalName || `Your name's ${productName}`}</Text>
+          <Text style={[styles.renameCounter, isNameTooLong && styles.renameCounterError]}>
+            {utf8ByteLength(finalName)} / {MAX_DEVICE_NAME_BYTES}
+          </Text>
+          {feedbackMessage ? (
+            <Text style={[styles.renameFeedback, phase === 'success' && styles.renameSuccess]}>{feedbackMessage}</Text>
+          ) : null}
+          {!connected && !isComplete && !isSaving ? <Text style={styles.renameFeedback}>Connect your earbuds before saving.</Text> : null}
+          <Pressable
+            accessibilityRole="button"
+            disabled={(!isComplete && (!!validationMessage || !connected || isSaving))}
+            onPress={isComplete ? onClose : onSave}
+            style={[styles.primaryButton, styles.renameAction, (!isComplete && (!!validationMessage || !connected || isSaving)) && styles.disabledButton]}
+          >
+            <Text style={styles.primaryButtonText}>{isComplete ? 'DONE' : isSaving ? 'SAVING…' : 'SAVE'}</Text>
+          </Pressable>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+
 function GestureInstruction({icon, gesture, side, copy}: {icon: ReactNode; gesture: string; side: string; copy: string}) {
   return (
     <View style={styles.gestureInstruction}>
@@ -556,6 +672,10 @@ function AppContent() {
   const [noiseInfoVisible, setNoiseInfoVisible] = useState(false);
   const [soundInfoVisible, setSoundInfoVisible] = useState(false);
   const [activePage, setActivePage] = useState<'home' | 'gestures'>('home');
+  const [renameVisible, setRenameVisible] = useState(false);
+  const [renameOwnerName, setRenameOwnerName] = useState('');
+  const [renamePhase, setRenamePhase] = useState<RenamePhase>('idle');
+  const [renameMessage, setRenameMessage] = useState<string | null>(null);
   const mounted = useRef(true);
   const scanInFlight = useRef(false);
 
@@ -595,7 +715,12 @@ function AppContent() {
       }
     });
     const controlsSubscription = jieliEvents.addListener(CONTROLS_EVENT, next => {
-      setControls(current => ({ ...current, ...(next as Partial<ControlsState>) }));
+      const event = next as Partial<ControlsState> & {renameStatus?: RenamePhase; renameMessage?: string | null};
+      setControls(current => ({ ...current, ...(event as Partial<ControlsState>) }));
+      if (event.renameStatus) {
+        setRenamePhase(event.renameStatus);
+        setRenameMessage(event.renameMessage ?? null);
+      }
     });
 
     void scan();
@@ -625,6 +750,38 @@ function AppContent() {
   const caseStatusLabel = controls.caseStatus === null ? 'Unavailable' : controls.caseStatus === 'open' ? 'Open' : 'Closed';
   const casePowerLabel = earbuds.caseCharging ? 'Charging' : earbuds.case === null ? 'Unavailable' : 'Not charging';
 
+  const openRename = () => {
+    if (!connected || !earbuds.productName) {
+      return;
+    }
+    setRenameOwnerName(ownerNameFromDeviceName(earbuds.deviceName, earbuds.productName));
+    setRenamePhase('idle');
+    setRenameMessage(null);
+    setRenameVisible(true);
+  };
+
+  const closeRename = () => {
+    if (renamePhase === 'saving') {
+      return;
+    }
+    setRenameVisible(false);
+  };
+
+  const saveRename = () => {
+    if (!earbuds.productName || !connected) {
+      return;
+    }
+    const validationMessage = validateOwnerName(renameOwnerName, earbuds.productName);
+    if (validationMessage) {
+      setRenamePhase('error');
+      setRenameMessage(validationMessage === 'That name is too long for the earbuds.' ? 'Name too long' : null);
+      return;
+    }
+    setRenamePhase('saving');
+    setRenameMessage(null);
+    jieli.setDeviceName(buildDeviceName(renameOwnerName, earbuds.productName));
+  };
+
   return (
     <View style={[styles.screen, { paddingTop: insets.top + 18 }]}> 
       <StatusBar barStyle="light-content" />
@@ -643,7 +800,7 @@ function AppContent() {
         <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer} showsVerticalScrollIndicator={false}>
           <View style={styles.heroCard}>
             <View style={styles.heroDeviceVisual}>
-              {earbuds.deviceName?.toLowerCase().includes('zenvibe') ? (
+              {earbuds.productName?.toLowerCase().includes('zenvibe') ? (
                 <Image source={ZENVIBE_DEVICE_IMAGE} style={styles.heroDeviceImage} resizeMode="contain" />
               ) : (
                 <View style={styles.heroBud}>
@@ -651,7 +808,18 @@ function AppContent() {
                 </View>
               )}
             </View>
-            <Text style={styles.deviceName}>{earbuds.deviceName ?? 'Musungo ZenVibe 2'}</Text>
+            <View style={styles.deviceNameRow}>
+              <Text style={styles.deviceName}>{earbuds.deviceName ?? earbuds.productName ?? 'Earbuds'}</Text>
+              <Pressable
+                accessibilityLabel="Rename earbuds"
+                accessibilityRole="button"
+                disabled={!earbuds.productName}
+                onPress={openRename}
+                style={[styles.renameButton, !earbuds.productName && styles.disabledButton]}
+              >
+                <IconPencil size={18} color="#d8c3ff" strokeWidth={1.8} />
+              </Pressable>
+            </View>
             <View style={styles.connectionChip}>
               <IconCircleCheck size={14} color="#70df90" strokeWidth={1.9} />
               <Text style={styles.connectionChipText}>Connected</Text>
@@ -790,6 +958,23 @@ function AppContent() {
 
       <NoiseControlsModal visible={noiseInfoVisible} onClose={() => setNoiseInfoVisible(false)} />
       <SoundControlsModal visible={soundInfoVisible} onClose={() => setSoundInfoVisible(false)} />
+      <RenameModal
+        connected={connected}
+        message={renameMessage}
+        onClose={closeRename}
+        onOwnerNameChange={value => {
+          setRenameOwnerName(value);
+          if (renamePhase !== 'saving') {
+            setRenamePhase('idle');
+            setRenameMessage(null);
+          }
+        }}
+        onSave={saveRename}
+        ownerName={renameOwnerName}
+        phase={renamePhase}
+        productName={earbuds.productName}
+        visible={renameVisible}
+      />
     </View>
   );
 }
@@ -875,6 +1060,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     width: 68,
   },
+  deviceNameRow: { alignItems: 'center', flexDirection: 'row', gap: 10, justifyContent: 'center', width: '100%' },
+  renameButton: { alignItems: 'center', justifyContent: 'center', padding: 6 },
   connectionChip: {
     alignItems: 'center',
     backgroundColor: 'rgba(112, 223, 144, 0.12)',
@@ -1050,7 +1237,7 @@ const styles = StyleSheet.create({
   disconnectedCopy: { color: '#8997aa', fontFamily: 'Carlito', fontSize: 14, lineHeight: 21, marginTop: 12, maxWidth: 290, textAlign: 'center' },
   primaryButton: { backgroundColor: '#f4f4f4', borderRadius: 14, marginTop: 28, paddingHorizontal: 28, paddingVertical: 16 },
   disabledButton: { opacity: 0.65 },
-  primaryButtonText: { color: '#171717', fontFamily: 'Carlito', fontSize: 14, fontWeight: '800' },
+  primaryButtonText: { color: '#171717', fontFamily: 'Carlito', fontSize: 14, fontWeight: '800', textAlign: 'center' },
   modalBackdrop: { alignItems: 'center', backgroundColor: 'rgba(0, 0, 0, 0.72)', flex: 1, justifyContent: 'center', padding: 22 },
   modalCard: {
     backgroundColor: '#202020',
@@ -1080,5 +1267,13 @@ const styles = StyleSheet.create({
   gestureCount: { color: '#d8c3ff', fontFamily: 'Carlito', fontSize: 13, fontWeight: '700', width: 62 },
   gestureText: { color: '#eeeeee', fontFamily: 'Carlito', fontSize: 12 },
   modalFootnote: { color: '#858585', fontFamily: 'Carlito', fontSize: 10, lineHeight: 16, marginTop: 8 },
+  renameLabel: { color: '#f4f7fb', fontFamily: 'Carlito', fontSize: 12, fontWeight: '700', marginBottom: 7 },
+  renameInput: { backgroundColor: '#2b2b2b', borderColor: '#555555', borderRadius: 13, borderWidth: 1, color: '#f4f7fb', fontFamily: 'Carlito', fontSize: 16, paddingHorizontal: 13, paddingVertical: 11 },
+  renamePreview: { color: '#d8c3ff', fontFamily: 'Carlito', fontSize: 17, fontWeight: '700', marginTop: 16 },
+  renameCounter: { alignSelf: 'flex-end', color: '#858585', fontFamily: 'Carlito', fontSize: 11, fontWeight: '700', marginTop: 8 },
+  renameCounterError: { color: '#ff7777' },
+  renameFeedback: { color: '#ffb86b', fontFamily: 'Carlito', fontSize: 11, lineHeight: 17, marginTop: 12 },
+  renameSuccess: { color: '#70df90' },
+  renameAction: { alignSelf: 'stretch', marginTop: 20 },
   footer: { color: '#666666', fontSize: 11, textAlign: 'center' },
 });

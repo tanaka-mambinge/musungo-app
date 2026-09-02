@@ -42,6 +42,8 @@ class JieliModule(private val context: ReactApplicationContext) : ReactContextBa
         private const val EVENT = "jieliStateChanged"
         private const val CONTROLS_EVENT = "jieliControlsChanged"
         private const val DEVICE_ADDRESS = "EB:77:75:7D:7B:42"
+        private const val ZENVIBE_2_PRODUCT_NAME = "ZenVibe 2"
+        private const val MAX_DEVICE_NAME_BYTES = 31
     }
 
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -51,6 +53,7 @@ class JieliModule(private val context: ReactApplicationContext) : ReactContextBa
     private var scanning = false
     private var callbackRegistered = false
     private var currentDevice: BluetoothDevice? = null
+    private var pendingRename: Pair<BluetoothDevice, String>? = null
     private var batteryPoll: Runnable? = null
     private var reconnectGrace: Runnable? = null
     private var monitoringCase = false
@@ -121,6 +124,7 @@ class JieliModule(private val context: ReactApplicationContext) : ReactContextBa
                     startBatteryPolling(connectedDevice)
                     queryControls(connectedDevice)
                     startCaseStatusMonitor()
+                    verifyPendingRename(connectedDevice)
                 } else if (state == BluetoothProfile.STATE_CONNECTED) {
                     cancelReconnectGrace()
                     currentDevice = device
@@ -129,6 +133,7 @@ class JieliModule(private val context: ReactApplicationContext) : ReactContextBa
                     startBatteryPolling(device)
                     queryControls(device)
                     startCaseStatusMonitor()
+                    verifyPendingRename(device)
                 } else if (state == BluetoothProfile.STATE_CONNECTING || state == BluetoothProfile.STATE_DISCONNECTING) {
                     cancelReconnectGrace()
                     currentDevice = device
@@ -316,6 +321,62 @@ class JieliModule(private val context: ReactApplicationContext) : ReactContextBa
                     }
                 },
             )
+        }
+    }
+
+    @ReactMethod
+    fun setDeviceName(name: String) {
+        mainHandler.post {
+            val cleanName = name.trim()
+            val nameBytes = cleanName.toByteArray(Charsets.UTF_8)
+            if (cleanName.isEmpty()) {
+                emitRenameStatus("error", "Enter a name for your earbuds.")
+                return@post
+            }
+            if (nameBytes.size > MAX_DEVICE_NAME_BYTES) {
+                emitRenameStatus("error", "That name is too long for the earbuds.")
+                return@post
+            }
+            if (cleanName.any { it.isISOControl() || (it.isWhitespace() && it != ' ') }) {
+                emitRenameStatus("error", "Use spaces instead of line breaks or tabs.")
+                return@post
+            }
+
+            val activeController = controller
+            val device = currentDevice ?: activeController?.usingDevice
+            if (activeController == null || device == null || !activeController.isDeviceConnected(device)) {
+                emitRenameStatus("error", "Connect your earbuds before renaming them.")
+                return@post
+            }
+
+            emitRenameStatus("saving", null)
+            activeController.configDeviceName(device, cleanName, object : OnRcspActionCallback<Int> {
+                override fun onSuccess(ignoredDevice: BluetoothDevice, result: Int) {
+                    if (result != 0) {
+                        mainHandler.post {
+                            emitRenameStatus("error", "The earbuds rejected the new name (code $result).")
+                        }
+                        return
+                    }
+                    mainHandler.post {
+                        pendingRename = device to cleanName
+                        activeController.rebootDevice(device, object : OnRcspActionCallback<Boolean> {
+                            override fun onSuccess(ignoredDevice: BluetoothDevice, ignoredResult: Boolean) {
+                                // The saved ADV name becomes active after the device restarts.
+                            }
+
+                            override fun onError(ignoredDevice: BluetoothDevice, error: BaseError) {
+                                pendingRename = null
+                                emitRenameStatus("error", error.toString())
+                            }
+                        })
+                    }
+                }
+
+                override fun onError(ignoredDevice: BluetoothDevice, error: BaseError) {
+                    mainHandler.post { emitRenameStatus("error", error.toString()) }
+                }
+            })
         }
     }
 
@@ -569,6 +630,51 @@ class JieliModule(private val context: ReactApplicationContext) : ReactContextBa
         emitControls(map)
     }
 
+    private fun emitRenameStatus(status: String, message: String?) {
+        val map = Arguments.createMap()
+        map.putString("renameStatus", status)
+        if (message == null) map.putNull("renameMessage") else map.putString("renameMessage", message)
+        emitControls(map)
+    }
+
+    private fun verifyDeviceName(device: BluetoothDevice, expectedName: String) {
+        val activeController = controller ?: return
+        activeController.getDeviceSettingsInfo(device, -1, object : OnRcspActionCallback<ADVInfoResponse> {
+            override fun onSuccess(ignoredDevice: BluetoothDevice, info: ADVInfoResponse) {
+                val reportedName = info.deviceName?.takeIf { it.isNotBlank() }
+                mainHandler.post {
+                    if (reportedName == expectedName) {
+                        pendingRename = null
+                        emitBattery(info)
+                        val bluetoothName = deviceName(device)
+                        if (bluetoothName == expectedName) {
+                            emitRenameStatus("success", "Your earbuds are now called $expectedName.")
+                        } else {
+                            emitRenameStatus("error", "Saved the app name, but Bluetooth still reports $bluetoothName. This firmware does not support changing its Bluetooth name.")
+                        }
+                    } else {
+                        pendingRename = null
+                        emitRenameStatus("error", "The new name could not be confirmed by the earbuds.")
+                    }
+                }
+            }
+
+            override fun onError(ignoredDevice: BluetoothDevice, error: BaseError) {
+                mainHandler.post {
+                    pendingRename = null
+                    emitRenameStatus("error", "The new name was not confirmed: ${error.toString()}")
+                }
+            }
+        })
+    }
+
+    private fun verifyPendingRename(device: BluetoothDevice) {
+        val rename = pendingRename ?: return
+        if (sameDevice(rename.first, device)) {
+            verifyDeviceName(device, rename.second)
+        }
+    }
+
     private fun byteArrayToArray(values: ByteArray?): WritableArray {
         val array = Arguments.createArray()
         values?.forEach { array.pushInt(it.toInt()) }
@@ -588,6 +694,8 @@ class JieliModule(private val context: ReactApplicationContext) : ReactContextBa
         val reportedName = info.deviceName?.takeIf { it.isNotBlank() }
         val resolvedName = reportedName ?: currentDevice?.let { deviceName(it) } ?: "Earbuds"
         map.putString("deviceName", resolvedName)
+        val resolvedProductName = currentDevice?.let { productName(it) }
+        if (resolvedProductName == null) map.putNull("productName") else map.putString("productName", resolvedProductName)
         putBattery(map, "left", info.leftDeviceQuantity, info.isLeftCharging)
         putBattery(map, "right", info.rightDeviceQuantity, info.isRightCharging)
         putBattery(map, "case", info.chargingBinQuantity, info.isDeviceCharging)
@@ -624,6 +732,8 @@ class JieliModule(private val context: ReactApplicationContext) : ReactContextBa
         map.putString("status", status)
         map.putBoolean("scanning", status == "scanning" || status == "connecting")
         if (deviceName == null) map.putNull("deviceName") else map.putString("deviceName", deviceName)
+        val resolvedProductName = currentDevice?.let { productName(it) }
+        if (resolvedProductName == null) map.putNull("productName") else map.putString("productName", resolvedProductName)
         map.putNull("left")
         map.putNull("right")
         map.putNull("case")
@@ -669,6 +779,9 @@ class JieliModule(private val context: ReactApplicationContext) : ReactContextBa
     } catch (_: SecurityException) {
         "Earbuds"
     }
+
+    private fun productName(device: BluetoothDevice): String? =
+        if (device.address.equals(DEVICE_ADDRESS, ignoreCase = true)) ZENVIBE_2_PRODUCT_NAME else null
 
     private fun sameDevice(first: BluetoothDevice?, second: BluetoothDevice): Boolean =
         first?.address?.equals(second.address, ignoreCase = true) == true
