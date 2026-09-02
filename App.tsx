@@ -43,7 +43,7 @@ import IconPhoneOff from '@tabler/icons-react-native/IconPhoneOff';
 import IconPencil from '@tabler/icons-react-native/IconPencil';
 import IconPlayerPlay from '@tabler/icons-react-native/IconPlayerPlay';
 import IconPlayerTrackNext from '@tabler/icons-react-native/IconPlayerTrackNext';
-import IconScan from '@tabler/icons-react-native/IconScan';
+import IconAccessPoint from '@tabler/icons-react-native/IconAccessPoint';
 import IconVolume from '@tabler/icons-react-native/IconVolume';
 import IconVolume3 from '@tabler/icons-react-native/IconVolume3';
 import IconX from '@tabler/icons-react-native/IconX';
@@ -437,7 +437,7 @@ function ScanningMark() {
         ]}
       />
       <View style={styles.scanMark}>
-        <IconScan size={44} color="#d8c3ff" strokeWidth={1.5} />
+        <IconAccessPoint size={44} color="#d8c3ff" strokeWidth={1.5} />
       </View>
     </View>
   );
