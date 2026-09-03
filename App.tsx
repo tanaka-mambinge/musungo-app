@@ -465,21 +465,21 @@ function NoiseControlsModal({visible, onClose}: {visible: boolean; onClose: () =
             <IconCircleOff size={24} color="#d8d8d8" strokeWidth={1.7} />
             <View style={styles.modalOptionCopy}>
               <Text style={styles.modalOptionTitle}>Off</Text>
-              <Text style={styles.modalOptionText}>Turns off the earbuds’ active noise processing.</Text>
+              <Text style={styles.modalOptionText}>Turns off active noise control.</Text>
             </View>
           </View>
           <View style={styles.modalOption}>
             <IconCircleDot size={24} color="#70df90" strokeWidth={1.7} />
             <View style={styles.modalOptionCopy}>
               <Text style={styles.modalOptionTitle}>ANC</Text>
-              <Text style={styles.modalOptionText}>Reduces steady outside noise using the earbuds’ microphones.</Text>
+              <Text style={styles.modalOptionText}>Reduces steady background noise around you.</Text>
             </View>
           </View>
           <View style={styles.modalOption}>
             <IconCircleDotted size={24} color="#d8d8d8" strokeWidth={1.7} />
             <View style={styles.modalOptionCopy}>
               <Text style={styles.modalOptionTitle}>Ambient</Text>
-              <Text style={styles.modalOptionText}>Feeds surrounding sound through so you can stay aware.</Text>
+              <Text style={styles.modalOptionText}>Lets outside sound in so you can stay aware.</Text>
             </View>
           </View>
         </Pressable>
