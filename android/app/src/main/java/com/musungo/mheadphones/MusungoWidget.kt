@@ -6,7 +6,11 @@ import android.appwidget.AppWidgetProvider
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.RectF
 import android.widget.RemoteViews
 
 class MusungoWidget : AppWidgetProvider() {
@@ -47,6 +51,7 @@ class MusungoWidget : AppWidgetProvider() {
         internal const val NOISE_MODE = "noise_mode"
         private const val WIDGET_COUNT = "widget_count"
         private const val ACTION_CYCLE_NOISE = MusungoDeviceService.ACTION_CYCLE_NOISE
+        private val ICON_TINT = Color.parseColor("#D7DEDB")
 
         fun hasWidgets(context: Context): Boolean =
             AppWidgetManager.getInstance(context)
@@ -65,13 +70,16 @@ class MusungoWidget : AppWidgetProvider() {
             leftCharging: Boolean = false,
             rightCharging: Boolean = false,
         ) {
-            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-                .putString(STATUS, status)
-                .putString(LEFT, left?.toString())
-                .putString(RIGHT, right?.toString())
-                .putBoolean(LEFT_CHARGING, leftCharging)
-                .putBoolean(RIGHT_CHARGING, rightCharging)
-                .apply()
+            val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            val editor = prefs.edit().putString(STATUS, status)
+            if (status == "connected") {
+                editor
+                    .putString(LEFT, left?.toString())
+                    .putString(RIGHT, right?.toString())
+                    .putBoolean(LEFT_CHARGING, leftCharging)
+                    .putBoolean(RIGHT_CHARGING, rightCharging)
+            }
+            editor.apply()
             updateAll(context)
         }
 
@@ -106,34 +114,44 @@ class MusungoWidget : AppWidgetProvider() {
             val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             val status = prefs.getString(STATUS, "disconnected") ?: "disconnected"
             val connected = status == "connected"
-            val name = prefs.getString(DEVICE_NAME, null)?.takeIf { it.isNotBlank() } ?: "Musungo earbuds"
-            val left = if (connected) prefs.getString(LEFT, null) ?: "—" else "—"
-            val right = if (connected) prefs.getString(RIGHT, null) ?: "—" else "—"
-            val leftCharging = connected && prefs.getBoolean(LEFT_CHARGING, false)
-            val rightCharging = connected && prefs.getBoolean(RIGHT_CHARGING, false)
-            val noiseMode = prefs.getInt(NOISE_MODE, 0)
             val views = RemoteViews(context.packageName, R.layout.widget_musungo)
+
+            if (connected) {
+                bindConnectedState(context, views, widgetId, prefs)
+            } else {
+                bindSkeletonState(views, widgetId, context)
+            }
+
+            manager.updateAppWidget(widgetId, views)
+        }
+
+        private fun bindConnectedState(context: Context, views: RemoteViews, widgetId: Int, prefs: android.content.SharedPreferences) {
+            val name = prefs.getString(DEVICE_NAME, null)?.takeIf { it.isNotBlank() } ?: "Musungo earbuds"
+            val left = prefs.getString(LEFT, null)?.toIntOrNull()?.coerceIn(0, 100)
+            val right = prefs.getString(RIGHT, null)?.toIntOrNull()?.coerceIn(0, 100)
+            val leftCharging = prefs.getBoolean(LEFT_CHARGING, false)
+            val rightCharging = prefs.getBoolean(RIGHT_CHARGING, false)
+            val noiseMode = prefs.getInt(NOISE_MODE, 0)
+
+            views.setViewVisibility(R.id.widget_connected_content, android.view.View.VISIBLE)
+            views.setViewVisibility(R.id.widget_skeleton_content, android.view.View.GONE)
             views.setTextViewText(R.id.widget_device_name, name)
-            views.setTextViewText(R.id.widget_connection_status, connectionLabel(status))
-            views.setTextColor(R.id.widget_connection_status, connectionColor(status))
-            views.setViewVisibility(R.id.widget_battery_row, if (connected) android.view.View.VISIBLE else android.view.View.GONE)
-            views.setViewVisibility(R.id.widget_state_row, if (connected) android.view.View.GONE else android.view.View.VISIBLE)
-            views.setViewVisibility(R.id.widget_noise_row, if (connected) android.view.View.VISIBLE else android.view.View.GONE)
-            views.setImageViewResource(R.id.widget_state_icon, connectionIcon(status))
-            views.setTextViewText(R.id.widget_state_message, connectionMessage(status))
-            views.setTextViewText(R.id.widget_state_detail, connectionDetail(status))
-            views.setTextViewText(R.id.widget_left_battery, formatBattery("L", left))
-            views.setTextViewText(R.id.widget_right_battery, formatBattery("R", right))
-            views.setProgressBar(R.id.widget_left_battery_progress, 100, batteryProgress(left), false)
-            views.setProgressBar(R.id.widget_right_battery_progress, 100, batteryProgress(right), false)
+
+            views.setImageViewBitmap(R.id.widget_left_ring, createRingBitmap(left))
+            views.setImageViewBitmap(R.id.widget_right_ring, createRingBitmap(right))
+            views.setImageViewResource(R.id.widget_left_bud, R.drawable.widget_earbud_right)
+            views.setImageViewResource(R.id.widget_right_bud, R.drawable.widget_earbud_left)
+
             views.setImageViewResource(R.id.widget_left_battery_icon, batteryIcon(left, leftCharging))
             views.setImageViewResource(R.id.widget_right_battery_icon, batteryIcon(right, rightCharging))
-            views.setInt(R.id.widget_left_battery_icon, "setColorFilter", batteryColor(leftCharging))
-            views.setInt(R.id.widget_right_battery_icon, "setColorFilter", batteryColor(rightCharging))
-            views.setTextViewText(R.id.widget_noise_mode, noiseLabel(noiseMode))
+            views.setInt(R.id.widget_left_battery_icon, "setColorFilter", ICON_TINT)
+            views.setInt(R.id.widget_right_battery_icon, "setColorFilter", ICON_TINT)
+            views.setTextViewText(R.id.widget_left_battery, formatBattery(left))
+            views.setTextViewText(R.id.widget_right_battery, formatBattery(right))
+
             views.setImageViewResource(R.id.widget_noise_mode_icon, noiseIcon(noiseMode))
-            views.setImageViewResource(R.id.widget_left_bud, R.drawable.widget_earbud_left)
-            views.setImageViewResource(R.id.widget_right_bud, R.drawable.widget_earbud_right)
+            views.setInt(R.id.widget_noise_mode_icon, "setColorFilter", ICON_TINT)
+            views.setTextViewText(R.id.widget_noise_mode, noiseLabel(noiseMode))
 
             val openAppIntent = Intent(context, MainActivity::class.java)
             val openAppPendingIntent = PendingIntent.getActivity(
@@ -142,7 +160,7 @@ class MusungoWidget : AppWidgetProvider() {
                 openAppIntent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
-            views.setOnClickPendingIntent(R.id.widget_state_row, openAppPendingIntent)
+            views.setOnClickPendingIntent(R.id.widget_title_button, openAppPendingIntent)
 
             val cycleIntent = Intent(context, MusungoWidget::class.java).setAction(ACTION_CYCLE_NOISE)
             val cyclePendingIntent = PendingIntent.getBroadcast(
@@ -152,62 +170,70 @@ class MusungoWidget : AppWidgetProvider() {
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
             views.setOnClickPendingIntent(R.id.widget_noise_row, cyclePendingIntent)
-            manager.updateAppWidget(widgetId, views)
         }
 
-        private fun formatBattery(label: String, value: String): String = if (value == "—") "$label  —" else "$label  $value%"
+        private fun bindSkeletonState(views: RemoteViews, widgetId: Int, context: Context) {
+            views.setViewVisibility(R.id.widget_connected_content, android.view.View.GONE)
+            views.setViewVisibility(R.id.widget_skeleton_content, android.view.View.VISIBLE)
 
-        private fun batteryProgress(value: String): Int = value.toIntOrNull()?.coerceIn(0, 100) ?: 0
+            val openAppIntent = Intent(context, MainActivity::class.java)
+            val openAppPendingIntent = PendingIntent.getActivity(
+                context,
+                widgetId,
+                openAppIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+            views.setOnClickPendingIntent(R.id.widget_skeleton_content, openAppPendingIntent)
+        }
 
-        private fun batteryIcon(value: String, charging: Boolean): Int {
+        private fun createRingBitmap(percent: Int?): Bitmap {
+            val lowBattery = percent != null && percent <= 30 && percent > 0
+            val size = 240
+            val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(bitmap)
+            val strokeWidth = 24f
+            val inset = strokeWidth / 2f + 2f
+            val ringRect = RectF(inset, inset, size - inset, size - inset)
+
+            val basePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                style = Paint.Style.STROKE
+                this.strokeWidth = strokeWidth
+                color = Color.parseColor("#33403C")
+                strokeCap = Paint.Cap.ROUND
+            }
+
+            val progressPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                style = Paint.Style.STROKE
+                this.strokeWidth = strokeWidth
+                color = Color.parseColor(if (lowBattery) "#FF6B6B" else "#70DF90")
+                strokeCap = Paint.Cap.ROUND
+            }
+
+            canvas.drawArc(ringRect, 0f, 360f, false, basePaint)
+            if (percent != null) {
+                canvas.drawArc(ringRect, -90f, 3.6f * percent, false, progressPaint)
+            }
+            return bitmap
+        }
+
+        private fun formatBattery(value: Int?): String = value?.let { "$it%" } ?: "—"
+
+        private fun batteryIcon(percent: Int?, charging: Boolean): Int {
             if (charging) return R.drawable.widget_battery_charging
-            val percent = value.toIntOrNull() ?: return R.drawable.widget_battery
+            val value = percent ?: return R.drawable.widget_battery
             return when {
-                percent < 20 -> R.drawable.widget_battery
-                percent < 40 -> R.drawable.widget_battery_1
-                percent < 60 -> R.drawable.widget_battery_2
-                percent < 80 -> R.drawable.widget_battery_3
+                value <= 20 -> R.drawable.widget_battery
+                value <= 40 -> R.drawable.widget_battery_1
+                value <= 60 -> R.drawable.widget_battery_2
+                value <= 80 -> R.drawable.widget_battery_3
                 else -> R.drawable.widget_battery_4
             }
         }
 
-        private fun batteryColor(charging: Boolean): Int =
-            Color.parseColor(if (charging) "#70DF90" else "#BCBCBC")
-
-        private fun connectionLabel(status: String): String = when (status) {
-            "connected" -> "Connected"
-            "connecting" -> "Connecting…"
-            "scanning" -> "Searching…"
-            else -> "Disconnected"
-        }
-
-        private fun connectionColor(status: String): Int = when (status) {
-            "connected" -> Color.parseColor("#70DF90")
-            "connecting", "scanning" -> Color.parseColor("#FFC66D")
-            else -> Color.parseColor("#AEB4BD")
-        }
-
-        private fun connectionIcon(status: String): Int = when (status) {
-            "disconnected" -> R.drawable.widget_status_disconnected
-            else -> R.drawable.widget_status_connecting
-        }
-
-        private fun connectionMessage(status: String): String = when (status) {
-            "connecting" -> "Connecting to your earbuds"
-            "scanning" -> "Looking for your earbuds"
-            else -> "Earbuds disconnected"
-        }
-
-        private fun connectionDetail(status: String): String = when (status) {
-            "connecting" -> "Keep them nearby"
-            "scanning" -> "Keep the case open"
-            else -> "Tap to open Musungo and reconnect"
-        }
-
         private fun noiseLabel(mode: Int): String = when (mode) {
-            1 -> "Noise cancellation"
-            2 -> "Transparency"
-            else -> "Noise controls off"
+            1 -> "ANC"
+            2 -> "Ambient"
+            else -> "Off"
         }
 
         private fun noiseIcon(mode: Int): Int = when (mode) {

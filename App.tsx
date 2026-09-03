@@ -130,8 +130,8 @@ const EQ_NAMES: Record<number, string> = {
 
 const ANC_NAMES: Record<number, string> = {
   0: 'Off',
-  1: 'Noise cancel',
-  2: 'Transparency',
+  1: 'ANC',
+  2: 'Ambient',
 };
 
 const initialState: EarbudState = {
@@ -251,13 +251,13 @@ function BatteryMetric({
 }) {
   const BatteryIcon = charging
     ? IconBatteryCharging
-    : value === null || value < 20
+    : value === null || value <= 20
       ? IconBattery
-      : value < 40
+      : value <= 40
         ? IconBattery1
-        : value < 60
+        : value <= 60
           ? IconBattery2
-          : value < 80
+          : value <= 80
             ? IconBattery3
             : IconBattery4;
 
@@ -471,14 +471,14 @@ function NoiseControlsModal({visible, onClose}: {visible: boolean; onClose: () =
           <View style={styles.modalOption}>
             <IconCircleDot size={24} color="#70df90" strokeWidth={1.7} />
             <View style={styles.modalOptionCopy}>
-              <Text style={styles.modalOptionTitle}>Noise cancel</Text>
+              <Text style={styles.modalOptionTitle}>ANC</Text>
               <Text style={styles.modalOptionText}>Reduces steady outside noise using the earbuds’ microphones.</Text>
             </View>
           </View>
           <View style={styles.modalOption}>
             <IconCircleDotted size={24} color="#d8d8d8" strokeWidth={1.7} />
             <View style={styles.modalOptionCopy}>
-              <Text style={styles.modalOptionTitle}>Transparency</Text>
+              <Text style={styles.modalOptionTitle}>Ambient</Text>
               <Text style={styles.modalOptionText}>Feeds surrounding sound through so you can stay aware.</Text>
             </View>
           </View>

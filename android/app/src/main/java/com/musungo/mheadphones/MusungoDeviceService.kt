@@ -32,6 +32,7 @@ class MusungoDeviceService : Service() {
         private const val NOTIFICATION_ID = 7701
         private const val BATTERY_POLL_INTERVAL_MS = 60_000L
         private const val CONNECT_TIMEOUT_MS = 15_000L
+        private const val DISCONNECT_GRACE_MS = 4_000L
 
         fun startMonitoring(context: android.content.Context) {
             start(context, ACTION_START_MONITOR)
@@ -63,6 +64,7 @@ class MusungoDeviceService : Service() {
     private var pendingCycle = false
     private var connectTimeout: Runnable? = null
     private var batteryPoll: Runnable? = null
+    private var disconnectGrace: Runnable? = null
 
     private val rcspCallback = object : BTRcspEventCallback() {
         override fun onConnection(device: BluetoothDevice, state: Int) {
@@ -77,17 +79,12 @@ class MusungoDeviceService : Service() {
                     state == BluetoothProfile.STATE_CONNECTING || state == BluetoothProfile.STATE_DISCONNECTING -> {
                         if (!connected) {
                             activeDevice = device
-                            if (MusungoWidget.isConnected(this@MusungoDeviceService)) {
-                                updateNotification("Reconnecting to your earbuds")
-                            } else {
-                                MusungoWidget.updateState(this@MusungoDeviceService, "connecting", null, null)
-                                updateNotification("Connecting to your earbuds")
-                            }
+                            updateNotification("Connecting to your earbuds")
                         }
                     }
                     state == BluetoothProfile.STATE_DISCONNECTED -> {
                         if (activeDevice == null || activeDevice?.address.equals(device.address, ignoreCase = true)) {
-                            handleDisconnected()
+                            scheduleDisconnectGrace()
                         }
                     }
                 }
@@ -115,9 +112,7 @@ class MusungoDeviceService : Service() {
         super.onCreate()
         Log.d("MusungoService", "Service created")
         createNotificationChannel()
-        promoteToForeground(
-            if (MusungoWidget.isConnected(this)) "Reconnecting to your earbuds" else "Connecting to your earbuds",
-        )
+        promoteToForeground("Connecting to your earbuds")
         if (JieliControllerRuntime.hasBluetoothPermission(this)) {
             controller = JieliControllerRuntime.getController(this)
             controller?.addBTRcspEventCallback(rcspCallback)
@@ -139,6 +134,7 @@ class MusungoDeviceService : Service() {
     override fun onDestroy() {
         connectTimeout?.let(mainHandler::removeCallbacks)
         batteryPoll?.let(mainHandler::removeCallbacks)
+        disconnectGrace?.let(mainHandler::removeCallbacks)
         controller?.removeBTRcspEventCallback(rcspCallback)
         activeDevice = null
         connected = false
@@ -178,9 +174,7 @@ class MusungoDeviceService : Service() {
 
         connected = false
         activeDevice = JieliControllerRuntime.findBondedDevice(this)
-        val reconnecting = MusungoWidget.isConnected(this)
-        if (!reconnecting) MusungoWidget.updateState(this, "connecting", null, null)
-        updateNotification(if (reconnecting) "Reconnecting to your earbuds" else "Connecting to your earbuds")
+        updateNotification("Connecting to your earbuds")
         val connectStarted = JieliControllerRuntime.connectKnownDevice(this, activeController)
         if (!connectStarted) {
             Log.d("MusungoService", "No bonded ZenVibe device available for background connection")
@@ -205,6 +199,7 @@ class MusungoDeviceService : Service() {
 
     private fun handleConnected(activeController: RCSPController, device: BluetoothDevice) {
         Log.d("MusungoService", "Connected device=${device.address} pendingCycle=$pendingCycle")
+        cancelDisconnectGrace()
         if (connected && isActiveDevice(device)) {
             if (pendingCycle) sendNextNoiseMode(device)
             return
@@ -223,8 +218,34 @@ class MusungoDeviceService : Service() {
         if (pendingCycle) sendNextNoiseMode(device)
     }
 
+    private fun scheduleDisconnectGrace() {
+        disconnectGrace?.let(mainHandler::removeCallbacks)
+        val grace = Runnable {
+            disconnectGrace = null
+            if (!connected) {
+                val activeController = controller
+                val stillConnected = activeController?.isDeviceConnected() == true
+                if (stillConnected) {
+                    val device = activeController?.let { JieliControllerRuntime.currentDevice(it) }
+                    if (device != null) {
+                        handleConnected(activeController!!, device)
+                        return@Runnable
+                    }
+                }
+                connected = false
+                activeDevice = null
+                batteryPoll?.let(mainHandler::removeCallbacks)
+                batteryPoll = null
+                pendingCycle = false
+                MusungoWidget.updateState(this@MusungoDeviceService, "disconnected", null, null)
+                stopSelf()
+            }
+        }
+        disconnectGrace = grace
+        mainHandler.postDelayed(grace, DISCONNECT_GRACE_MS)
+    }
+
     private fun handleDisconnected() {
-        if (!connected && activeDevice == null) return
         connected = false
         activeDevice = null
         batteryPoll?.let(mainHandler::removeCallbacks)
@@ -232,6 +253,11 @@ class MusungoDeviceService : Service() {
         pendingCycle = false
         MusungoWidget.updateState(this, "disconnected", null, null)
         stopSelf()
+    }
+
+    private fun cancelDisconnectGrace() {
+        disconnectGrace?.let(mainHandler::removeCallbacks)
+        disconnectGrace = null
     }
 
     private fun startBatteryPolling(activeController: RCSPController, device: BluetoothDevice) {
