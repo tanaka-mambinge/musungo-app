@@ -134,7 +134,7 @@ The `Android release` workflow creates a GitHub Release for that tag and attache
 
 React Native 0.87's Fabric/New Architecture component descriptors were crashing during PROD startup when the release C++ build defined `NDEBUG`. The app could install successfully but immediately died with a native `SIGSEGV` before the first screen rendered.
 
-The release CMake configuration in `android/app/src/main/jni/CMakeLists.txt` keeps assertions enabled by adding `-UNDEBUG` to the `RelWithDebInfo` flags. Do not remove the custom CMake configuration or re-add `-DNDEBUG` to that release configuration without retesting startup on an emulator.
+The release CMake configuration in `android/app/src/main/jni/CMakeLists.txt` keeps assertions and React Native's debug-string type configuration consistent across the `RelWithDebInfo` build. Do not remove the custom CMake configuration or re-add `-DNDEBUG` to that release configuration without retesting startup on an emulator.
 
 ## Widget background monitoring
 
