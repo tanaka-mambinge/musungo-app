@@ -97,30 +97,38 @@ This project has two co-installable Android builds:
 
 The Kotlin namespace stays `com.musungo.mheadphones` for both variants. Only the debug application ID receives the `.dev` suffix, so native integrations continue to use the same namespace while Android keeps the app data and launcher entries separate.
 
-## Build PROD
+## Publish a signed PROD release
 
-From the repository root, use a JDK that includes `javac` (JDK 17 is the tested setup):
+Release APKs are built and uploaded by GitHub Actions when a `v*` tag is pushed. Release signing is intentionally unavailable unless the required keystore and properties are present; the release variant never falls back to the debug keystore.
+
+### One-time GitHub setup
+
+1. Create a release keystore somewhere outside this repository. Keep the keystore and passwords backed up securely because the keystore must remain the same for future app updates.
+
+   ```sh
+   keytool -genkeypair -v -keystore musungo-release.keystore \
+     -alias musungo-release -keyalg RSA -keysize 2048 -validity 10000
+   ```
+
+2. In the repository's **Settings > Secrets and variables > Actions**, add these repository secrets:
+
+   - `ANDROID_KEYSTORE_BASE64`: the base64-encoded contents of `musungo-release.keystore` (`base64 -w 0 musungo-release.keystore` on Linux; use `base64 musungo-release.keystore | tr -d '\\n'` on macOS).
+   - `ANDROID_KEYSTORE_PASSWORD`: the keystore password.
+   - `ANDROID_KEY_ALIAS`: `musungo-release` (or the alias chosen above).
+   - `ANDROID_KEY_PASSWORD`: the key password.
+
+   The workflow writes the keystore and `android/keystore.properties` only on the GitHub runner, uses them to assemble the release APK, verifies its signature, and removes them before the job ends.
+
+### Publish a release
+
+Push a version tag from the commit that should be released:
 
 ```sh
-cd android
-env JAVA_HOME=/path/to/jdk-17 PATH=/path/to/jdk-17/bin:$PATH \
-  ./gradlew :app:assembleRelease \
-  -x :app:lintVitalRelease \
-  -x :app:lintVitalAnalyzeRelease \
-  -x :app:lintVitalReportRelease
+git tag v1.0.5
+git push origin v1.0.5
 ```
 
-The standalone APK is written to:
-
-```text
-android/app/build/outputs/apk/release/app-release.apk
-```
-
-Install it on a connected emulator or device with:
-
-```sh
-adb install -r android/app/build/outputs/apk/release/app-release.apk
-```
+The `Android release` workflow creates a GitHub Release for that tag and attaches `app-release.apk`. Debug builds remain available through `npm run android` and continue to use the `.dev` application ID.
 
 ## Release native-build fix
 

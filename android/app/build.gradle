@@ -72,6 +72,23 @@ def enableProguardInReleaseBuilds = false
  */
 def jscFlavor = 'io.github.react-native-community:jsc-android:2026004.+'
 
+def releaseKeystorePropertiesFile = rootProject.file("keystore.properties")
+def releaseKeystoreProperties = new Properties()
+if (releaseKeystorePropertiesFile.exists()) {
+    releaseKeystorePropertiesFile.withInputStream { releaseKeystoreProperties.load(it) }
+}
+
+def requiredReleaseSigningProperties = [
+    "storeFile",
+    "storePassword",
+    "keyAlias",
+    "keyPassword"
+]
+def releaseSigningPropertiesPresent = requiredReleaseSigningProperties.every {
+    releaseKeystoreProperties.containsKey(it) && !releaseKeystoreProperties[it].toString().trim().isEmpty()
+}
+def releaseKeystoreFile = releaseSigningPropertiesPresent ? file(releaseKeystoreProperties["storeFile"]) : null
+
 android {
     ndkVersion rootProject.ext.ndkVersion
     buildToolsVersion rootProject.ext.buildToolsVersion
@@ -98,6 +115,14 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
+        release {
+            if (releaseSigningPropertiesPresent) {
+                storeFile releaseKeystoreFile
+                storePassword releaseKeystoreProperties["storePassword"]
+                keyAlias releaseKeystoreProperties["keyAlias"]
+                keyPassword releaseKeystoreProperties["keyPassword"]
+            }
+        }
     }
     buildTypes {
         debug {
@@ -106,11 +131,26 @@ android {
             versionNameSuffix "-dev"
         }
         release {
-            // Caution! In production, you need to generate your own keystore file.
-            // see https://reactnative.dev/docs/signed-apk-android.
-            signingConfig signingConfigs.debug
+            signingConfig signingConfigs.release
             minifyEnabled enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
+        }
+    }
+}
+
+gradle.taskGraph.whenReady { taskGraph ->
+    if (taskGraph.allTasks.any { it.name.toLowerCase().contains("release") }) {
+        def missingReleaseSigningProperties = requiredReleaseSigningProperties.findAll {
+            !releaseKeystoreProperties.containsKey(it) || releaseKeystoreProperties[it].toString().trim().isEmpty()
+        }
+        if (!missingReleaseSigningProperties.isEmpty()) {
+            throw new GradleException(
+                "Release signing is not configured. Add android/keystore.properties with: " +
+                    missingReleaseSigningProperties.join(", ")
+            )
+        }
+        if (!releaseKeystoreFile.exists()) {
+            throw new GradleException("Release keystore does not exist: ${releaseKeystoreFile}")
         }
     }
 }
